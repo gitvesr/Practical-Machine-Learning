@@ -1,0 +1,240 @@
+---
+title: "Practical Machine Learning Assignment "
+author: "vesr"
+date: "November 9, 2017"
+output: html_document
+---
+
+## Prediction Assignment
+
+### Background
+Smart wearable devices such as AppleWatch, Samsung, Fitbit etc is now allowing to collect a large amount of data about personal activities accurately. These devices are integral part of health and self motivaation - a study consisting of measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  
+   
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).   The raw training data has 19622 rows of observations and 158 features (predictors). Column `X` is unusable row number. While the testing data has 20 rows and the same 158 features. There is one column of target outcome named `classe`.
+
+### Preparing the data and R packages  
+
+#### Load packages, set caching 
+
+```{r, message=FALSE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+library(knitr)
+knitr::opts_chunk$set(cache=TRUE)
+```
+Preparing and downloading the data from the website.
+#### Getting Data
+```{r}
+# URL of the training and testing data
+set.seed(12345)
+
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+
+training <- read.csv("c:/pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv("c:/pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+
+```  
+
+The raw training data has 19622 rows of observations and 158 features (predictors). Column `X` is unusable row number. While the testing data has 20 rows and the same 158 features. There is one column of target outcome named `classe`.   
+
+#### Data cleaning
+
+First, extract target outcome (the activity quality) from training data, so now the training data contains only the predictors (the activity monitors).   
+```{r}
+inTrain <- createDataPartition(training$classe, p=0.6, list=FALSE)
+myTraining <- training[inTrain, ]
+myTesting <- training[-inTrain, ]
+dim(myTraining); dim(myTesting)
+
+```
+
+##Cleaning the data
+###Remove NearZeroVariance variables 
+  
+```{r}
+
+nzv <- nearZeroVar(myTraining, saveMetrics=TRUE)
+myTraining <- myTraining[,nzv$nzv==FALSE]
+
+nzv<- nearZeroVar(myTesting,saveMetrics=TRUE)
+myTesting <- myTesting[,nzv$nzv==FALSE]
+
+```
+
+###Remove Column header from Training Data Set.  Clean variables with more than 70% NA
+  
+```{r}
+
+myTraining <- myTraining[c(-1)]
+
+trainingTemp <- myTraining
+for(i in 1:length(myTraining)) {
+  if( sum( is.na( myTraining[, i] ) ) /nrow(myTraining) >= .7) {
+    for(j in 1:length(trainingTemp)) {
+      if( length( grep(names(myTraining[i]), names(trainingTemp)[j]) ) == 1)  {
+        trainingTemp <- trainingTemp[ , -j]
+      }   
+    } 
+  }
+}
+
+# Set back to the original variable name
+myTraining <- trainingTemp
+rm(trainingTemp)
+```
+   
+####Filter the myTesting and testing data sets   and remove the 58 variable
+```{r}
+
+clean1 <- colnames(myTraining)
+clean2 <- colnames(myTraining[, -58])  # remove the classe column
+myTesting <- myTesting[clean1]         # allow only variables in myTesting that are also in myTraining
+testing <- testing[clean2]             # allow only variables in testing that are also in myTraining
+
+dim(myTesting)
+
+dim(testing)
+```
+   
+####Coerce the data into the same type
+```{r}
+
+for (i in 1:length(testing) ) {
+  for(j in 1:length(myTraining)) {
+    if( length( grep(names(myTraining[i]), names(testing)[j]) ) == 1)  {
+      class(testing[j]) <- class(myTraining[i])
+    }      
+  }      
+}
+
+# To get the same class between testing and myTraining
+testing <- rbind(myTraining[2, -58] , testing)
+testing <- testing[-1,]
+```
+## Predicting with Fancy Plot. 
+FancyPlot are excellent tool for prediction due to the facts
+simple to understand (white box)
+from a tree we can extract interpretable results and make simple decisions
+they are helpful for exploratory analysis as binary structure of tree is simple to visualize
+very good prediction accuracy performance
+very fast
+they can be simply tuned by ensemble learning techniques
+```{r}
+# convert character levels to numeric
+set.seed(12345)
+modFitA1 <- rpart(classe ~ ., data=myTraining, method="class")
+fancyRpartPlot(modFitA1, caption = "Prediction using FancyPlot")
+```
+   
+Create Confusionmatrix. The outcome is removed from training data.   
+```{r}
+predictionsA1 <- predict(modFitA1, myTesting, type = "class")
+cmtree <- confusionMatrix(predictionsA1, myTesting$classe)
+cmtree
+```
+
+The assignment rubric asks to use data from accelerometers on the `belt`, `forearm`, `arm`, and `dumbell`, so the features are extracted based on these keywords.   
+  
+```{r}
+# filter columns on: belt, forearm, arm, dumbell
+plot(cmtree$table, col = cmtree$byClass, main = paste("Decision Tree Confusion Matrix: Accuracy =", round(cmtree$overall['Accuracy'], 4)))
+
+```
+
+##Prediction with Random Forests.  
+Random Forests  can deal with "small and large problems, high-order interactions, correlated predictor variables are used. Method not only for prediction, but also to assess variable importance
+  
+```{r}
+set.seed(12345)
+modFitB1 <- randomForest(classe ~ ., data=myTraining)
+predictionB1 <- predict(modFitB1, myTesting, type = "class")
+cmrf <- confusionMatrix(predictionB1, myTesting$classe)
+cmrf
+
+```
+
+###Plot Random Forest Confusion Matrix with Accuracy   
+  
+```{r}
+
+
+plot(cmrf$table, col = cmtree$byClass, main = paste("Random Forest Confusion Matrix: Accuracy =", round(cmrf$overall['Accuracy'], 4)))
+
+```
+###Plot modfit values - Error vs Tree    
+  
+```{r}
+plot(modFitB1)
+```
+
+##Prediction with Generalized Boosted Regression 
+  
+```{r}
+set.seed(12345)
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 5,
+                           repeats = 1)
+
+gbmFit1 <- train(classe ~ ., data=myTraining, method = "gbm",
+                 trControl = fitControl,
+                 verbose = FALSE)
+
+
+gbmFinMod1 <- gbmFit1$finalModel
+
+gbmPredTest <- predict(gbmFit1, newdata=myTesting)
+gbmAccuracyTest <- confusionMatrix(gbmPredTest, myTesting$classe)
+gbmAccuracyTest
+```
+
+##Plot Generalized Boosted Regression for the Max Tree Depth vs. Accuracy    
+  
+```{r}
+
+plot(gbmFit1, ylim=c(0.9, 1))
+
+```
+
+##Predicting Results on the Test Data  
+  
+```{r}
+
+predictionB2 <- predict(modFitB1, testing, type = "class")
+predictionB2
+
+```
+
+For this dataset, random forest method is way better than classification tree method.  Random Forests gave an Accuracy in the myTesting dataset of 99.89%, which was more accurate that what I got from the Decision Trees or GBM. The expected out-of-sample error is 100-99.89 = 0.11%. This may be due to the fact that many predictors are highly correlated. Random forests chooses a subset of predictors at each split and decorrelate the trees. This leads to high accuracy, although this algorithm is sometimes difficult to interpret and computationally inefficient.  
+
+The expected out-of-sample error is 100-99.89 = 0.11%. 
+  
+```{r}
+
+
+#predictionB2[2]
+#write.table(predictionB2[2], file="c:/test123.txt", row.names =  FALSE, col.names =FALSE)
+
+
+#for (i in 1:20) {
+#filename = paste0("c:/problem_id_",i,".txt")
+#write.table(predictionB2[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+#}
+
+# Write the results to a text file for submission
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+  
+    filename = paste0("c:/problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(predictionB2)
+```
+
